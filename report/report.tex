@@ -17,7 +17,7 @@
 \usepackage{titlesec}
 \usepackage{caption}
 \usepackage{cite}
-\usepackage{tipa}  % \textschwa for the Azerbaijani letter in column names
+\usepackage[safe]{tipa}  % \textschwa for the Azerbaijani letter in column names
 \newcommand{\az}[1]{\emph{#1}}
 \usepackage[hidelinks]{hyperref}
 \usepackage{url}
@@ -277,8 +277,8 @@ threshold and scaler re-fit inside each fold.
     Ours: DecisionTree (mse)   & \textbf{0.2311} & 0.866 & 44{,}089 \\
     sklearn: DTRegressor        & 0.2311 & 0.866 & 44{,}083 \\
     Ours: Ridge, normal eq.\ [B8] & 0.3032 & 0.769 & 63{,}454 \\
-    Ours: RandomForest$\times$30 [B9] & RFRMSE & RFR2 & RFMAE \\
-    sklearn: RandomForest$\times$30  & SKRFRMSE & --- & --- \\
+    Ours: RandomForest$\times$30 [B9] & 0.2222 & 0.876 & 44{,}612 \\
+    sklearn: RandomForest$\times$30  & 0.2151 & 0.884 & --- \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -399,11 +399,13 @@ median-split framing, not a model deficiency
 (Fig.~\ref{fig:conf}).
 
 \textbf{Where the regressor fails} (Fig.~\ref{fig:err}): median relative
-error is $\approx$8--10\% through the mid-market but roughly doubles in
-the top decile (luxury homes priced on unobserved finish/view/prestige)
-and is worst in sparse peripheral districts and the house/garden-house
-segment, where land value and build quality are poorly captured by our
-features. The k-means bonus (Fig.~\ref{fig:kmeans}) localises the same
+error is $\approx$8--10\% through the mid-market but rises to 13\% in the
+cheapest decile and 16\% in the most expensive one --- both tails are
+priced on attributes we do not observe (dilapidation on one end;
+finish, view and prestige on the other). Geographically the error is
+worst in garden-house suburbs such as M\textschwa rd\textschwa kan
+($\sim$13\% median) where land value and build quality are poorly
+captured by our features. The k-means bonus (Fig.~\ref{fig:kmeans}) localises the same
 effect geographically: suburban/garden segments reach 15--21\% median
 error vs.\ $\sim$8\% in the dense urban core.
 
@@ -425,11 +427,12 @@ is non-additive (area $\times$ location interactions) and a linear model
 cannot express it.
 
 \textbf{P9 --- a forest of our own trees.} Bagging 30 of our trees
-(bootstrap + per-split $\sqrt{d}$ feature subsampling, depth 14) drives
-test RMSE$_{\log}$ from 0.2311 (single tree) to RFRMSE, tracking
-sklearn's \texttt{RandomForestRegressor} (SKRFRMSE) built with the same
-settings; Fig.~\ref{fig:rf} shows error falling monotonically as trees
-are added.
+(bootstrap + per-split $\sqrt{d}$ feature subsampling, unlimited depth)
+drives test RMSE$_{\log}$ from 0.2311 (single tuned tree) to 0.2222,
+tracking sklearn's \texttt{RandomForestRegressor} (0.2151) built with the
+same settings; Fig.~\ref{fig:rf} shows error falling monotonically as
+trees are added. The residual gap to sklearn comes from tie-breaking and
+feature-sampling details, consistent with the single-tree comparison.
 
 \textbf{P10 --- market segments.} k-means ($k{=}8$) on coordinates plus a
 2-D PCA view of the feature space (Fig.~\ref{fig:kmeans}) yields

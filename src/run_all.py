@@ -564,8 +564,8 @@ def analysis(df, names, tree_reg, tree_cls, svm_lin, Xs_te,
     cols = [C_GREEN if w[i] > 0 else C_VERM for i in topw][::-1]
     ax.barh([names[i] for i in topw][::-1], w[topw][::-1], color=cols)
     ax.axvline(0, color=C_GRAY, lw=0.8)
-    _style(ax, "(b) Pegasos SVM weights (Task B, standardized)",
-           "weight (+ = premium)", None)
+    _style(ax, "(b) Pegasos SVM weights (Task B)",
+           "weight (+ = premium, standardized)", None)
     savefig(fig, "fig_importance.png")
     RESULTS["top_features_tree"] = [(names[i], float(imp[i])) for i in top]
     RESULTS["top_weights_svm"] = [(names[i], float(w[i])) for i in topw]
@@ -582,7 +582,8 @@ def analysis(df, names, tree_reg, tree_cls, svm_lin, Xs_te,
         for i in range(2):
             for j in range(2):
                 ax.text(j, i, f"{cm[i, j]:,}", ha="center", va="center",
-                        color="black", fontsize=10)
+                        color="white" if cm[i, j] > cm.max() / 2 else "black",
+                        fontsize=10)
         ax.set_xticks([0, 1], ["standard", "premium"])
         ax.set_yticks([0, 1], ["standard", "premium"])
         ax.set_xlabel("predicted"); ax.set_ylabel("actual")
@@ -741,7 +742,9 @@ def bonuses(X_tr, ylog_tr, X_te, ylog_te, y_te, Xs_tr, Xs_te,
     ax.scatter(df.iloc[idx_te]["lng"].values[sub],
                df.iloc[idx_te]["lat"].values[sub],
                c=cl_te[sub], cmap="tab10", s=3, alpha=0.6)
-    _style(ax, "(a) k-means market segments (test listings)", "longitude",
+    ax.set_xlim(49.3, 50.45)   # zoom to the Absheron peninsula,
+    ax.set_ylim(40.15, 40.75)  # where >99% of listings sit
+    _style(ax, "(a) k-means market segments (test, Baku area)", "longitude",
            "latitude")
     ax = axes[1]
     ax.bar([str(c) for c, _, _ in clus_err], [e for _, e, _ in clus_err],
