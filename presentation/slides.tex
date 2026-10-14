@@ -14,8 +14,7 @@
 
 \title{Baku Apartment Prices from the Inside:\\
 \large A From-Scratch Decision Tree and Pegasos SVM on bina.az Listings}
-% TODO(team): list all members here.
-\author{H\"useynova, T. \quad --- \quad ---}
+\author{Alish Hajiyev \quad Tahmina H\"useynova \quad Nihat Ismayilzade \quad Elshan Samadzade}
 \institute{MLE-AI-201 Machine Learning · AI Academy, Cohort II}
 \date{October 2026}
 
@@ -66,9 +65,14 @@
 
 \begin{frame}{Split and framing}
   \begin{itemize}
-    \item Seeded 70/15/15 split: \textbf{40{,}195 / 8{,}613 / 8{,}613}.
-    \item Tier threshold from the \emph{training} median only; balance
-          49.9 / 50.5 / 48.9\,\% premium --- balanced by construction.
+    \item Seeded, \textbf{stratified} 70/15/15 split on log-price deciles:
+          \textbf{40{,}197 / 8{,}612 / 8{,}612}; median log-price
+          identical in all three (12.2453).
+    \item Tier threshold from the \emph{training} median only (208k AZN);
+          premium share 49.9 / 49.8 / 49.8\,\% --- matched by the
+          stratification.
+    \item District one-hot vocabulary fitted on train only --- no
+          encoding statistic sees val/test.
     \item All tuning on validation; test touched once per final model.
     \item Metrics: RMSE/MAE/$R^2$ (log and AZN) · precision/recall/F1,
           ROC-AUC, confusion matrix.
@@ -103,8 +107,8 @@
   \begin{itemize}
     \item Mini-batch (64) sub-gradient updates; bias unregularised;
           features standardised with train statistics.
-    \item Margin you can see: $\|\mathbf{w}\| = 3.83$, width
-          $2/\|\mathbf{w}\| = 0.52$; \textbf{11{,}693 / 40{,}195 (29\%)}
+    \item Margin you can see: $\|\mathbf{w}\| = 3.79$, width
+          $2/\|\mathbf{w}\| = 0.53$; \textbf{11{,}917 / 40{,}197 (30\%)}
           training points are support vectors.
     \item Non-linearity: \textbf{random Fourier features} ($D{=}300$) ---
           keeps training $O(nD)$ and reuses the same solver (kernel
@@ -117,8 +121,9 @@
   \includegraphics[width=0.8\linewidth]{fig_tree_depth.png}
   \begin{itemize}
     \item Train RMSE falls monotonically; validation bottoms at
-          \textbf{depth 14} $\Rightarrow$ classic overfitting beyond.
-    \item Gini vs.\ entropy: nearly identical (F1 0.9242 vs.\ 0.9225);
+          \textbf{depth 18} and drifts up to 30 $\Rightarrow$ classic
+          overfitting beyond.
+    \item Gini vs.\ entropy: nearly identical (F1 0.9232 vs.\ 0.9199);
           Gini chosen on validation.
   \end{itemize}
 \end{frame}
@@ -129,6 +134,17 @@
   \includegraphics[width=0.45\linewidth]{fig_svm_objective.png}
 \end{frame}
 
+\begin{frame}{SVM: epochs and the learning-rate schedule}
+  \centering
+  \includegraphics[width=0.85\linewidth]{fig_svm_schedule.png}
+  \begin{itemize}
+    \item All three solver knobs exposed: $\lambda$, epochs, schedule.
+    \item F1 plateaus after $\sim$10 epochs; $1/(\lambda t)$ reaches the
+          lowest objective; $\eta_0/\sqrt t$ shrinks $\mathbf w$ too slowly
+          (wider margin, lower F1).
+  \end{itemize}
+\end{frame}
+
 \begin{frame}{Headline results (test set)}
   \small
   \textbf{Task A — regression on log(price)}\par\smallskip
@@ -136,8 +152,8 @@
     \toprule
     & RMSE$_{\log}$ & $R^2_{\log}$ & MAE (AZN) \\
     \midrule
-    \textbf{Ours: DecisionTree} & \textbf{0.2311} & 0.866 & 44{,}089 \\
-    sklearn (matched) & 0.2311 & 0.866 & 44{,}083 \\
+    \textbf{Ours: DecisionTree} & \textbf{0.2289} & 0.865 & 42{,}626 \\
+    sklearn (matched) & 0.2287 & 0.866 & 42{,}598 \\
     \bottomrule
   \end{tabular}
   \par\bigskip
@@ -146,17 +162,17 @@
     \toprule
     & F1 & ROC-AUC \\
     \midrule
-    \textbf{Ours: DecisionTree} & \textbf{0.9200} & 0.960 \\
-    sklearn DecisionTree (matched) & 0.9204 & 0.959 \\
-    \textbf{Ours: PegasosSVM (linear)} & \textbf{0.8956} & 0.953 \\
-    sklearn SGDClassifier (hinge) & 0.8960 & 0.953 \\
-    Ours: Pegasos + RFF & 0.8458 & 0.931 \\
-    sklearn SVC-RBF (15k sub) & 0.8383 & 0.923 \\
+    \textbf{Ours: DecisionTree} & \textbf{0.9228} & 0.953 \\
+    sklearn DecisionTree (matched) & 0.9233 & 0.953 \\
+    \textbf{Ours: PegasosSVM (linear)} & \textbf{0.8971} & 0.956 \\
+    sklearn SGDClassifier (hinge) & 0.8989 & 0.956 \\
+    Ours: Pegasos + RFF & 0.8491 & 0.933 \\
+    sklearn SVC-RBF (15k sub) & 0.8449 & 0.926 \\
     \bottomrule
   \end{tabular}
   \par\bigskip
-  5-fold CV: tree $0.2311\pm0.0019$ (= sklearn); Pegasos F1
-  $0.899\pm0.003$ vs.\ SGD $0.900\pm0.003$.
+  5-fold CV: tree $0.2298\pm0.0022$ vs.\ sklearn $0.2295\pm0.0021$;
+  Pegasos F1 $0.899\pm0.002$ vs.\ SGD $0.900\pm0.001$.
 \end{frame}
 
 \begin{frame}{Why the numbers agree --- and where they don't}
@@ -169,9 +185,9 @@
     \item \textbf{Linear beats RBF here} (both ours and sklearn's):
           after one-hot encoding, 38/55 features are binary; the
           premium boundary is near-linear in area + centrality.
-    \item Speed: our tree 4.7 s vs.\ sklearn 0.45 s (Cython, same
+    \item Speed: our tree $\sim$6 s vs.\ sklearn 0.5 s (Cython, same
           $O(FN\log N)$); Pegasos 2.2 s; SVC-RBF needed a 15k subsample
-          (16.6 s fit, 11.6 s predict).
+          (16 s fit, 11.5 s predict).
   \end{itemize}
 \end{frame}
 
@@ -200,12 +216,13 @@
   \begin{columns}
     \column{0.5\textwidth}
     \begin{itemize}
-      \item \textbf{P8} Ridge via normal equations: $=$ sklearn to
-            $10^{-15}$; RMSE$_{\log}$ 0.303 --- linear can't express
-            area$\times$location.
+      \item \textbf{P8} Ridge (normal equations) $=$ sklearn to
+            $10^{-15}$; SVR (sub-gradient, $\varepsilon$-tube) $=$
+            \texttt{LinearSVR} to 4 decimals. Both RMSE$_{\log}$
+            $\approx$0.30 --- linear can't express area$\times$location.
       \item \textbf{P9} Forest of \emph{our} trees (bootstrap +
-            per-split $\sqrt{d}$): RMSE$_{\log}$ $0.2311 \to 0.2222$,
-            tracking sklearn's forest (0.2151).
+            per-split $\sqrt{d}$): RMSE$_{\log}$ $0.2289 \to 0.2211$,
+            tracking sklearn's forest (0.2166).
       \item \textbf{P10} k-means segments + PCA sharpen the error story:
             periphery is hardest.
     \end{itemize}

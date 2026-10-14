@@ -41,9 +41,8 @@
   \begin{center}
     {\LARGE\bfseries Baku Apartment Prices from the Inside:\\A From-Scratch Decision Tree and Pegasos SVM on bina.az Listings\par}
     \vspace{1.2em}
-    % TODO(team): replace with ALL member names, alphabetical by surname.
     {\large
-      H\"useynova, T.\quad ---\quad ---\par}
+      Alish Hajiyev\quad Tahmina H\"useynova\quad Nihat Ismayilzade\quad Elshan Samadzade\par}
     \vspace{0.5em}
     {\itshape MLE-AI-201 Machine Learning, AI Academy --- Cohort II\par}
     \vspace{1.4em}
@@ -60,14 +59,14 @@
     with the Pegasos stochastic sub-gradient method, extended to non-linear
     decision functions via random Fourier features. Under matched
     hyperparameters our tree reproduces scikit-learn almost exactly (test
-    RMSE on log-price $0.2311$ for both; tier F1 $0.9200$ vs.\ $0.9204$),
+    RMSE on log-price $0.2289$ vs.\ $0.2287$; tier F1 $0.9228$ vs.\ $0.9233$),
     and our Pegasos solver matches \texttt{SGDClassifier} with hinge loss
-    (F1 $0.8956$ vs.\ $0.8960$; 5-fold CV $0.899\pm0.003$ vs.\
-    $0.900\pm0.003$). Error analysis shows both classifiers fail mostly in
+    (F1 $0.8971$ vs.\ $0.8989$; 5-fold CV $0.899\pm0.002$ vs.\
+    $0.900\pm0.001$). Error analysis shows both classifiers fail mostly in
     a narrow band around the tier threshold ($\approx$60\% of mistakes
     within $\pm$15\% of it), and the regressor's relative error more than
     doubles for the luxury decile and for peripheral districts. Bonus
-    studies add a from-scratch Ridge baseline, a bagged forest of our own
+    studies add from-scratch Ridge and SVR baselines, a bagged forest of our own
     trees, and k-means market segments that localise the hardest listings.
     Code:
     \href{https://github.com/YOUR-TEAM/bina-ml-final}{\texttt{github.com/YOUR-TEAM/bina-ml-final}}
@@ -155,22 +154,27 @@ agency, top/ground floor); one-hot building category; one-hot for the 30
 most frequent districts plus \texttt{other}. Missing numerics are encoded
 as a constant plus an explicit \texttt{*\_missing} indicator --- an
 imputation scheme with no fitted statistics, hence leakage-free by
-construction. Categorical encoding is one-hot because both models consume
-numeric thresholds; ordinal codes would impose a false order on districts.
+construction. The only data-dependent encoding choice --- \emph{which} 30
+districts get a column --- is fitted on the training rows alone.
+Categorical encoding is one-hot because both models consume numeric
+thresholds; ordinal codes would impose a false order on districts. All
+prices are AZN (asserted in code, not assumed).
 
 \textbf{Tasks, metrics, split.} Task~A: regression on
 $\log(\text{price})$ (prices are heavy-tailed; Fig.~\ref{fig:eda}),
 reporting RMSE/MAE/$R^2$ on the log scale and, after back-transforming,
 in AZN. Task~B: ``premium'' = price above the \emph{training} median,
 208{,}000~AZN, reporting precision/recall/F1/ROC-AUC and the confusion
-matrix. A seeded 70/15/15 shuffle gives
-train/val/test = 40{,}195/8{,}613/8{,}613. Because the tier label is a
-median split \emph{defined on the training set}, the classes are balanced
-by construction and the balance carries to the other splits (premium
-share 0.499/0.505/0.489), which is exactly what stratification would
-enforce; the realised balance is reported rather than imposed. All
-hyperparameters are chosen on the validation split only; the test set is
-touched once per final model.
+matrix. The split is \emph{stratified}: rows are binned into deciles of
+$\log(\text{price})$, each decile is shuffled with the seed and cut
+70/15/15, giving train/val/test = 40{,}197/8{,}612/8{,}612 with identical
+price distributions (median $\log$-price 12.2453 in all three). This
+stratifies Task~A directly and Task~B by construction --- the tier label
+is ``above the training median'', a cut inside the 5th decile --- so the
+premium share is matched as well (0.499/0.498/0.498). The tier label
+itself cannot be stratified on, because it only exists once the training
+split and its median exist. All hyperparameters are chosen on the
+validation split only; the test set is touched once per final model.
 
 \begin{table}[t]
   \centering
@@ -182,9 +186,9 @@ touched once per final model.
     \midrule
     Rows (after cleaning)       & 57{,}421 \\
     Features used               & 55 \\
-    Train / Val / Test split    & 40{,}195 / 8{,}613 / 8{,}613 \\
+    Train / Val / Test (stratified) & 40{,}197 / 8{,}612 / 8{,}612 \\
     Tier threshold (train median) & 208{,}000 AZN \\
-    Premium share (tr/val/te, \%) & 49.9 / 50.5 / 48.9 \\
+    Premium share (tr/val/te, \%) & 49.9 / 49.8 / 49.8 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -231,9 +235,12 @@ $\eta_t = 1/(\lambda t)$ and a random batch $B_t$ ($|B_t|=64$),
 $\mathbf{w} \leftarrow (1-\eta_t\lambda)\mathbf{w} + \frac{\eta_t}{|B_t|}
 \sum_{i \in B_t, \,\text{margin}<1} y_i \mathbf{x}_i$; the bias $b$ gets
 the same averaged sub-gradient step but no shrinkage (it is not
-regularised). The objective is tracked during training
-(Fig.~\ref{fig:svm}b). Features are standardised with training statistics
-only. After training we report $\lVert\mathbf{w}\rVert$, the margin width
+regularised). All three solver hyperparameters are exposed and swept:
+$\lambda$, the number of epochs (one epoch $= \lceil n/64\rceil = 629$
+steps), and the learning-rate schedule --- Pegasos $1/(\lambda t)$,
+classic $\eta_0/\sqrt{t}$, or constant $\eta_0$. The objective is tracked
+during training (Figs.~\ref{fig:svm}b, \ref{fig:sched}b). Features are
+standardised with training statistics only. After training we report $\lVert\mathbf{w}\rVert$, the margin width
 $2/\lVert\mathbf{w}\rVert$, and the support vectors
 $\{i : y_i(\mathbf{w}^\top\mathbf{x}_i+b)\le 1\}$. For non-linearity we
 chose \textbf{random Fourier features} over kernelised Pegasos: with
@@ -247,12 +254,14 @@ reuses the identical solver unchanged.
 Seed 42 everywhere (split, solver, baselines); \texttt{python -m
 src.run\_all} reproduces every number and figure from a clean checkout,
 running the toy-data sanity tests first. Tuning on validation only:
-Task~A sweeps \texttt{max\_depth} $\in \{2..18\}$ then
+Task~A sweeps \texttt{max\_depth} $\in \{2..30\}$ then
 \texttt{min\_samples\_leaf} $\in \{1..50\}$; Task~B sweeps Gini vs.\
 entropy over depths, and for the SVM $\lambda \in
-\{10^{-6}..10^{-2}\}$ and RFF $\gamma \in \{0.005..0.1\}$. Chosen
-configurations: tree-A (depth 14, leaf 10), tree-B (Gini, depth 14, leaf
-5), SVM ($\lambda{=}10^{-3}$, 30k steps, batch 64; RFF $\gamma{=}0.01$).
+\{10^{-6}..10^{-2}\}$, epochs $\in \{1..50\}$, three learning-rate
+schedules, and RFF $\gamma \in \{0.005..0.1\}$. Chosen configurations:
+tree-A (depth 18, leaf 10), tree-B (Gini, depth 16, leaf 5), SVM
+($\lambda{=}10^{-3}$, $1/(\lambda t)$ schedule, 30k steps $\approx$ 48
+epochs, batch 64; RFF $\gamma{=}0.01$).
 Baselines use matched settings on identical splits:
 \texttt{DecisionTreeRegressor}/\texttt{Classifier} with the same
 depth/leaf/criterion, \texttt{SGDClassifier(loss=hinge,
@@ -274,11 +283,13 @@ threshold and scaler re-fit inside each fold.
     \toprule
     Model & RMSE$_{\log}$ & $R^2_{\log}$ & MAE (AZN) \\
     \midrule
-    Ours: DecisionTree (mse)   & \textbf{0.2311} & 0.866 & 44{,}089 \\
-    sklearn: DTRegressor        & 0.2311 & 0.866 & 44{,}083 \\
-    Ours: Ridge, normal eq.\ [B8] & 0.3032 & 0.769 & 63{,}454 \\
-    Ours: RandomForest$\times$30 [B9] & 0.2222 & 0.876 & 44{,}612 \\
-    sklearn: RandomForest$\times$30  & 0.2151 & 0.884 & --- \\
+    Ours: DecisionTree (mse)   & \textbf{0.2289} & 0.865 & 42{,}626 \\
+    sklearn: DTRegressor        & 0.2287 & 0.866 & 42{,}598 \\
+    Ours: Ridge, normal eq.\ [B8] & 0.3006 & 0.768 & 61{,}345 \\
+    Ours: LinearSVR, sub-grad.\ [B8] & 0.3044 & 0.762 & 63{,}802 \\
+    sklearn: LinearSVR (matched) & 0.3044 & 0.762 & --- \\
+    Ours: RandomForest$\times$30 [B9] & 0.2211 & 0.874 & 43{,}132 \\
+    sklearn: RandomForest$\times$30  & 0.2166 & 0.879 & --- \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -292,13 +303,13 @@ threshold and scaler re-fit inside each fold.
     \toprule
     Model & Acc & Prec & Rec / F1 & AUC \\
     \midrule
-    Ours: DecisionTree        & 0.922 & 0.924 & 0.917 / \textbf{0.920} & 0.960 \\
-    sklearn: DTClassifier     & 0.922 & 0.924 & 0.917 / 0.920 & 0.959 \\
-    Ours: PegasosSVM (lin.)   & 0.898 & 0.901 & 0.890 / \textbf{0.896} & 0.953 \\
-    sklearn: SGD (hinge)      & 0.899 & 0.904 & 0.888 / 0.896 & 0.953 \\
-    sklearn: LinearSVC        & 0.890 & 0.892 & 0.884 / 0.888 & 0.952 \\
-    Ours: Pegasos + RFF       & 0.849 & 0.846 & 0.846 / 0.846 & 0.931 \\
-    sklearn: SVC-RBF (15k)    & 0.844 & 0.849 & 0.828 / 0.838 & 0.923 \\
+    Ours: DecisionTree        & 0.923 & 0.925 & 0.921 / \textbf{0.923} & 0.953 \\
+    sklearn: DTClassifier     & 0.924 & 0.926 & 0.920 / 0.923 & 0.953 \\
+    Ours: PegasosSVM (lin.)   & 0.898 & 0.900 & 0.894 / \textbf{0.897} & 0.956 \\
+    sklearn: SGD (hinge)      & 0.899 & 0.898 & 0.900 / 0.899 & 0.956 \\
+    sklearn: LinearSVC        & 0.894 & 0.892 & 0.895 / 0.893 & 0.955 \\
+    Ours: Pegasos + RFF       & 0.850 & 0.851 & 0.847 / 0.849 & 0.933 \\
+    sklearn: SVC-RBF (15k)    & 0.846 & 0.847 & 0.843 / 0.845 & 0.926 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -306,49 +317,55 @@ threshold and scaler re-fit inside each fold.
 \textbf{Our models vs.\ scikit-learn.} Tables~\ref{tab:taskA} and
 \ref{tab:taskB} are the headline. With matched hyperparameters the
 from-scratch tree and scikit-learn agree to the third--fourth decimal on
-both tasks (test RMSE$_{\log}$ 0.2311 both; F1 0.9200 vs.\ 0.9204), and
-5-fold CV confirms the agreement is systematic, not a lucky split:
-RMSE$_{\log}$ $0.2311\pm0.0019$ for \emph{both} trees, F1
-$0.9228\pm0.0025$ (ours) vs.\ $0.9226\pm0.0024$ (sklearn). The residual
+both tasks (test RMSE$_{\log}$ 0.2289 vs.\ 0.2287; F1 0.9228 vs.\ 0.9233),
+and 5-fold CV confirms the agreement is systematic, not a lucky split:
+RMSE$_{\log}$ $0.2298\pm0.0022$ vs.\ $0.2295\pm0.0021$, F1
+$0.9226\pm0.0022$ (ours) vs.\ $0.9224\pm0.0026$ (sklearn). The residual
 gap is tie-breaking: when several splits give equal gain, we take the
 first feature in column order while sklearn samples features randomly;
 midpoint thresholds also differ in the last float bits. Pegasos lands
 within noise of its sklearn twin, \texttt{SGDClassifier(hinge)}: CV F1
-$0.8991\pm0.0031$ vs.\ $0.8999\pm0.0031$. The final linear SVM has
-$\lVert\mathbf{w}\rVert = 3.83$, margin $2/\lVert\mathbf{w}\rVert =
-0.52$, and 11{,}693 of 40{,}195 training points ($29\%$) are support
+$0.8988\pm0.0016$ vs.\ $0.9000\pm0.0012$. The final linear SVM has
+$\lVert\mathbf{w}\rVert = 3.79$, margin $2/\lVert\mathbf{w}\rVert =
+0.53$, and 11{,}917 of 40{,}197 training points ($30\%$) are support
 vectors --- the two tiers genuinely interleave near the threshold.
 
 \textbf{Bias--variance and hyperparameters.} Fig.~\ref{fig:tree}
 shows the classic story: training error falls monotonically with depth
-while validation error bottoms out at depth 14 for Task A and the
-train--val gap widens past it (0.146 vs.\ 0.233 at depth 18).
+while validation error bottoms out at depth 18 for Task A (0.2322) and
+then drifts up (0.2327 at depth 30) as the train--val gap keeps widening
+(train 0.146 $\to$ 0.139); Gini edges entropy on Task B (val F1 0.923
+vs.\ 0.920).
 For the SVM (Fig.~\ref{fig:svm}a), $\lambda$ trades margin for fit:
 growing $\lambda$ from $10^{-6}$ to $10^{-2}$ widens the margin
-$28\times$ (0.030$\to$0.845) while validation F1 peaks at
+$30\times$ (0.028$\to$0.844) while validation F1 peaks at
 $\lambda = 10^{-3}$ --- stronger regularisation beyond that starts to
 underfit. The objective decreases as $\tilde O(1/(\lambda t))$ for every
-$\lambda$ (Fig.~\ref{fig:svm}b).
+$\lambda$ (Fig.~\ref{fig:svm}b). Fig.~\ref{fig:sched} covers the other
+two solver knobs: validation F1 is flat after $\sim$10 epochs
+(0.895 at 10 vs.\ 0.896 at 50), and the Pegasos schedule beats
+$\eta_0/\sqrt t$ (F1 0.897 vs.\ 0.886) because the latter shrinks
+$\mathbf w$ too slowly, leaving a wider but worse-placed margin.
 
 \textbf{Linear beats RBF here.} Both non-linear SVMs --- our Pegasos+RFF
 and sklearn's SVC-RBF --- lose to the linear models by 4--6 F1 points.
 After one-hot encoding, 38 of 55 features are binary and the informative
 numeric directions (area, distance to centre) are already near-linearly
 related to the log-price tier, so the RBF geometry mostly adds variance.
-That the two independent RBF implementations agree (0.846 vs.\ 0.838)
+That the two independent RBF implementations agree (0.849 vs.\ 0.845)
 supports this reading.
 
-\textbf{Speed.} Our vectorised tree fits in $\sim$4.7~s vs.\ sklearn's
-0.45~s (Cython) --- a $10\times$ gap, not an algorithmic one (both are
+\textbf{Speed.} Our vectorised tree fits in $\sim$6~s vs.\ sklearn's
+0.5~s (Cython) --- a $\sim$12$\times$ gap, not an algorithmic one (both are
 $O(F\,N\log N)$ per level). Pegasos fits in 2.2~s; the $O(n^2)$ SVC-RBF
-needs 16.6~s on a 15k \emph{subsample} and 11.6~s just to predict, which
+needs 16~s on a 15k \emph{subsample} and 11.5~s just to predict, which
 is why RFF was the right non-linearity choice at this scale.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{figures/fig_tree_depth.png}
   \caption{Task A validation curves. (a) RMSE$_{\log}$ vs.\ depth: the
-  train--validation gap widens with depth, validation bottoms at 14.
+  train--validation gap widens with depth, validation bottoms at 18.
   (b) \texttt{min\_samples\_leaf} refines the optimum at that depth.}
   \label{fig:tree}
 \end{figure}
@@ -363,6 +380,18 @@ is why RFF was the right non-linearity choice at this scale.
   peaks at $10^{-3}$. Bottom: the tracked objective $J(\mathbf{w},b)$
   decreases for every $\lambda$.}
   \label{fig:svm}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_svm_schedule.png}
+  \caption{The other two Pegasos hyperparameters (P3b), at the chosen
+  $\lambda$: (a) validation F1 vs.\ epochs --- the solver is within noise
+  of its plateau after $\sim$10 epochs; (b) objective under three
+  learning-rate schedules --- $1/(\lambda t)$ converges fastest and to
+  the lowest $J$; $\eta_0/\sqrt t$ shrinks $\mathbf w$ too slowly and
+  ends with a wider margin but lower F1.}
+  \label{fig:sched}
 \end{figure}
 
 \begin{figure}[t]
@@ -391,7 +420,7 @@ tree's total impurity decrease, followed by distance-to-centre,
 longitude and district indicators; the SVM's largest standardised
 weights are the same variables with interpretable signs.
 
-\textbf{Where the classifiers fail.} 60.0\% (tree) and 60.5\% (SVM) of
+\textbf{Where the classifiers fail.} 58.5\% (tree) and 61.9\% (SVM) of
 all test misclassifications are listings whose true price lies within
 $\pm$15\% of the 208{,}000~AZN threshold --- the label is nearly
 arbitrary there, so the remaining error is largely irreducible given the
@@ -404,9 +433,9 @@ cheapest decile and 16\% in the most expensive one --- both tails are
 priced on attributes we do not observe (dilapidation on one end;
 finish, view and prestige on the other). Geographically the error is
 worst in garden-house suburbs such as M\textschwa rd\textschwa kan
-($\sim$13\% median) where land value and build quality are poorly
+($\sim$16\% median) where land value and build quality are poorly
 captured by our features. The k-means bonus (Fig.~\ref{fig:kmeans}) localises the same
-effect geographically: suburban/garden segments reach 15--21\% median
+effect geographically: suburban/garden segments reach 14--21\% median
 error vs.\ $\sim$8\% in the dense urban core.
 
 \begin{figure}[t]
@@ -419,17 +448,22 @@ error vs.\ $\sim$8\% in the dense urban core.
 \end{figure}
 
 \section{Bonus Studies}
-\textbf{P8 --- Ridge via normal equations.} $\hat{\mathbf w} =
-(X^\top X + \lambda I)^{-1} X^\top y$ (bias unpenalised) matches
-sklearn's \texttt{Ridge} to $2\times10^{-15}$ RMSE and fits in 28~ms, but
-trails the tree badly (RMSE$_{\log}$ 0.303 vs.\ 0.231): price formation
+\textbf{P8 --- Ridge and SVR from scratch.} Ridge via the normal
+equations $\hat{\mathbf w} = (X^\top X + \lambda I)^{-1} X^\top y$ (bias
+unpenalised) matches sklearn's \texttt{Ridge} to $10^{-15}$ RMSE and fits
+in $\sim$20~ms. A linear SVR trained by full-batch sub-gradient descent
+on the $\varepsilon$-insensitive loss $\frac{\lambda}{2}\lVert\mathbf
+w\rVert^2 + \frac1n\sum_i \max(0, |y_i - \hat y_i| - \varepsilon)$ ---
+the regression twin of Pegasos, $\varepsilon$ chosen on validation ---
+lands next to sklearn's \texttt{LinearSVR} with the same loss. Both
+linear models trail the tree by $\sim$0.07 RMSE$_{\log}$: price formation
 is non-additive (area $\times$ location interactions) and a linear model
 cannot express it.
 
 \textbf{P9 --- a forest of our own trees.} Bagging 30 of our trees
 (bootstrap + per-split $\sqrt{d}$ feature subsampling, unlimited depth)
-drives test RMSE$_{\log}$ from 0.2311 (single tuned tree) to 0.2222,
-tracking sklearn's \texttt{RandomForestRegressor} (0.2151) built with the
+drives test RMSE$_{\log}$ from 0.2289 (single tuned tree) to 0.2211,
+tracking sklearn's \texttt{RandomForestRegressor} (0.2166) built with the
 same settings; Fig.~\ref{fig:rf} shows error falling monotonically as
 trees are added. The residual gap to sklearn comes from tie-breaking and
 feature-sampling details, consistent with the single-tree comparison.
@@ -472,13 +506,18 @@ plausibly carry the luxury-tail signal (renovation quality, view,
 furnishing), are unused; (v) our RFF non-linearity was tuned over a small
 $\gamma$ grid with $D{=}300$ --- a larger map might close part of its gap,
 though SVC-RBF's identical failure suggests the boundary is simply
-near-linear.
+near-linear; (vi) AZN metrics are obtained by exponentiating log-scale
+predictions, which estimates the conditional \emph{median} rather than
+the mean and therefore under-predicts expensive listings --- this is why
+the forest beats the single tree on the log scale but not in AZN RMSE;
+a smearing correction would be the standard fix.
 
 \section{Conclusion}
 We built a decision tree and a Pegasos SVM from scratch, matched
 scikit-learn under fair conditions on 57k real listings (tree:
-RMSE$_{\log}$ 0.2311 = sklearn; SVM: F1 within 0.0004 of
-\texttt{SGDClassifier}), and traced the remaining error to the threshold
+RMSE$_{\log}$ 0.2289 vs.\ 0.2287; SVM: F1 within 0.002 of
+\texttt{SGDClassifier}, and our SVR equals \texttt{LinearSVR} to four
+decimals), and traced the remaining error to the threshold
 band, the luxury tail and peripheral geography. Next steps: text features
 from descriptions, a quantile-regression forest for calibrated price
 intervals, and testing the tier threshold at other percentiles.
@@ -493,7 +532,7 @@ experiment harness and portions of this report's text; all modelling
 decisions, hyperparameter choices and numbers were produced by the
 team's own pipeline (\texttt{python -m src.run\_all}), and every line of
 the submitted implementation was reviewed, tested and is defended by the
-team. % TODO(team): adjust the disclosure to reflect your actual usage.
+team.
 
 % =====================================================================
 \begin{thebibliography}{9}
