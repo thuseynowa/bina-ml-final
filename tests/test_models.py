@@ -16,7 +16,7 @@ from sklearn.linear_model import Ridge
 from sklearn.svm import LinearSVC
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
-from src.baselines import RidgeRegression
+from src.baselines import LinearSVR, RidgeRegression
 from src.data_prep import make_tier_label, stratified_split_indices
 from src.decision_tree import DecisionTree
 from src.evaluate import (confusion_matrix, mae, precision_recall_f1, r2,
@@ -142,6 +142,24 @@ def test_stratified_split_balances_price_and_tier():
     print("PASS stratified split matches price deciles and tier balance")
 
 
+def test_svr_matches_sklearn():
+    """P8: sub-gradient SVR lands near sklearn's LinearSVR (same loss)."""
+    from sklearn.svm import LinearSVR as SkSVR
+    X, y = make_regression(n_samples=400, n_features=6, noise=3.0,
+                           random_state=7)
+    X = (X - X.mean(0)) / X.std(0)
+    y = (y - y.mean()) / y.std()   # tube loss is scale-sensitive, like hinge
+    lam, eps = 1e-3, 0.05
+    ours = LinearSVR(lambda_=lam, epsilon=eps, n_epochs=3_000,
+                     eta0=0.5).fit(X, y)
+    hist = [v for _, v in ours.objective_history_]
+    assert hist[-1] < hist[0], "SVR objective did not decrease"
+    sk = SkSVR(C=1.0 / (lam * len(y)), epsilon=eps, loss="epsilon_insensitive",
+               max_iter=20_000, random_state=0, dual=True).fit(X, y)
+    assert abs(r2(y, ours.predict(X)) - r2(y, sk.predict(X))) < 0.02
+    print("PASS from-scratch SVR objective decreases and matches LinearSVR")
+
+
 def test_ridge_matches_sklearn():
     X, y = make_regression(n_samples=300, n_features=10, noise=5.0,
                            random_state=5)
@@ -184,6 +202,7 @@ def run_all_tests():
     test_pegasos_objective_decreases_and_matches_linear_svm()
     test_pegasos_schedules_and_epochs()
     test_stratified_split_balances_price_and_tier()
+    test_svr_matches_sklearn()
     test_ridge_matches_sklearn()
     test_metrics_match_sklearn()
     print("ALL TESTS PASSED")
