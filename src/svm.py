@@ -32,19 +32,40 @@ import numpy as np
 
 
 class PegasosSVM:
+    """
+    Hyperparameters exposed (statement P3b):
+      lambda_      regularisation strength (C-equivalent: C = 1/(n*lambda))
+      n_iters      number of sub-gradient steps; or give n_epochs and the
+                   step count is derived as n_epochs * ceil(n / batch_size)
+      lr_schedule  learning-rate schedule:
+                   "pegasos"  eta_t = 1/(lambda*t)      (Shalev-Shwartz 2011)
+                   "inv_sqrt" eta_t = eta0/sqrt(t)      (classic SGD)
+                   "constant" eta_t = eta0
+      eta0         base step for the non-Pegasos schedules
+      batch_size   mini-batch size per step
+    """
+
     def __init__(
         self,
-        lambda_: float = 1e-4,     # regularisation strength (~ 1/(n*C))
-        n_iters: int = 30_000,     # sub-gradient steps
-        batch_size: int = 64,      # mini-batch size per step
+        lambda_: float = 1e-4,
+        n_iters: int = 30_000,
+        batch_size: int = 64,
         random_state: int = 42,
         track_every: int = 500,    # record J(w,b) every k steps (0 = off)
+        lr_schedule: str = "pegasos",
+        eta0: float = 0.1,
+        n_epochs: int | None = None,
     ):
+        if lr_schedule not in ("pegasos", "inv_sqrt", "constant"):
+            raise ValueError(f"unknown lr_schedule {lr_schedule!r}")
         self.lambda_ = lambda_
         self.n_iters = n_iters
+        self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.random_state = random_state
         self.track_every = track_every
+        self.lr_schedule = lr_schedule
+        self.eta0 = eta0
         self.w: np.ndarray | None = None
         self.b: float = 0.0
         self.classes_: np.ndarray | None = None
@@ -74,8 +95,18 @@ class PegasosSVM:
         self.b = 0.0
         self.objective_history_ = []
 
-        for t in range(1, self.n_iters + 1):
-            eta = 1.0 / (self.lambda_ * t)
+        n_iters = self.n_iters
+        if self.n_epochs is not None:
+            n_iters = self.n_epochs * int(np.ceil(n / self.batch_size))
+        self.n_iters_ = n_iters
+
+        for t in range(1, n_iters + 1):
+            if self.lr_schedule == "pegasos":
+                eta = 1.0 / (self.lambda_ * t)
+            elif self.lr_schedule == "inv_sqrt":
+                eta = self.eta0 / np.sqrt(t)
+            else:
+                eta = self.eta0
             idx = rng.integers(0, n, size=min(self.batch_size, n))
             Xb, yb = X[idx], y_pm1[idx]
             active = yb * (Xb @ self.w + self.b) < 1.0
