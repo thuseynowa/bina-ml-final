@@ -7,14 +7,16 @@ Run from the repo root:
 Order of operations:
   0. sanity tests (our models vs sklearn on toy data)
   1. load + clean the data, EDA figures
-  2. features, 70/15/15 split, tier label from the TRAIN median
+  2. stratified 70/15/15 split (log-price deciles), features with the
+     district vocabulary fitted on train, tier label from the TRAIN median
   3. Task A: our DecisionTree regressor — depth & min_samples_leaf sweeps
   4. Task B: our DecisionTree classifier — gini vs entropy sweep
-  5. Task B: our PegasosSVM — lambda sweep, RFF gamma sweep, convergence
+  5. Task B: our PegasosSVM — lambda / epochs / LR-schedule sweeps,
+     RFF gamma sweep, convergence
   6. scikit-learn baselines with matched hyperparameters
   7. 5-fold CV uncertainty (mean ± std) for the headline models
   8. feature importances, SVM weights, error analysis
-  9. bonuses: from-scratch Ridge (P8), from-scratch RandomForest (P9),
+  9. bonuses: from-scratch Ridge + SVR (P8), from-scratch RandomForest (P9),
      k-means/PCA geospatial EDA (P10, sklearn allowed for bonuses)
  10. final results tables -> console + results/results.json + results/tables.md
 
@@ -36,7 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from . import data_prep, evaluate as ev
-from .baselines import RidgeRegression
+from .baselines import LinearSVR, RidgeRegression
 from .decision_tree import DecisionTree
 from .ensemble import RandomForest
 from .svm import PegasosSVM, RandomFourierFeatures
@@ -93,22 +95,30 @@ def load_and_prepare():
         print(f"  {step}: {n:,}")
     RESULTS["cleaning_log"] = log
 
-    X, y, names = data_prep.make_features(df)
+    header("2. STRATIFIED SPLIT + PRICE-TIER LABEL")
+    # Split FIRST (on price deciles), then build features, so the one
+    # data-dependent encoding choice (district vocabulary) sees train only.
+    y_all = df["price"].to_numpy(dtype=np.float64)
+    idx_tr, idx_val, idx_te = data_prep.stratified_split_indices(y_all)
+    X, y, names = data_prep.make_features(df, train_idx=idx_tr)
     print(f"  design matrix: {X.shape[0]:,} rows x {X.shape[1]} features")
     RESULTS["n_rows"], RESULTS["n_features"] = X.shape
     RESULTS["leakage_columns_dropped"] = data_prep.LEAKAGE_COLUMNS
 
-    header("2. SPLIT + PRICE-TIER LABEL")
-    (X_tr, y_tr, X_val, y_val, X_te, y_te,
-     idx_tr, idx_val, idx_te) = data_prep.train_val_test_split(X, y)
+    X_tr, y_tr = X[idx_tr], y[idx_tr]
+    X_val, y_val = X[idx_val], y[idx_val]
+    X_te, y_te = X[idx_te], y[idx_te]
     tier_tr, thr = data_prep.make_tier_label(y_tr)
     tier_val, _ = data_prep.make_tier_label(y_val, thr)
     tier_te, _ = data_prep.make_tier_label(y_te, thr)
     print(f"  split sizes: train={len(y_tr):,} val={len(y_val):,} "
-          f"test={len(y_te):,}")
+          f"test={len(y_te):,}  (stratified on log-price deciles)")
     print(f"  tier threshold (TRAIN median) = {thr:,.0f} AZN")
     print(f"  premium share: train={tier_tr.mean():.3f} "
           f"val={tier_val.mean():.3f} test={tier_te.mean():.3f}")
+    print(f"  median log-price: train={np.median(np.log(y_tr)):.4f} "
+          f"val={np.median(np.log(y_val)):.4f} "
+          f"test={np.median(np.log(y_te)):.4f}")
     RESULTS["split_sizes"] = [len(y_tr), len(y_val), len(y_te)]
     RESULTS["tier_threshold_azn"] = thr
     RESULTS["tier_balance"] = [float(tier_tr.mean()), float(tier_val.mean()),
@@ -158,7 +168,7 @@ def load_and_prepare():
 # ---------------------------------------------------------------- step 3
 def task_a_tree(X_tr, ylog_tr, X_val, ylog_val, X_te, ylog_te, y_te):
     header("3. TASK A — our DecisionTree regressor on log(price)")
-    depths = [2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18]
+    depths = [2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 30]
     tr_curve, val_curve = [], []
     for d in depths:
         t = DecisionTree(task="regression", criterion="mse", max_depth=d,
@@ -219,7 +229,7 @@ def task_a_tree(X_tr, ylog_tr, X_val, ylog_val, X_te, ylog_te, y_te):
 # ---------------------------------------------------------------- step 4
 def task_b_tree(X_tr, tier_tr, X_val, tier_val, X_te, tier_te):
     header("4. TASK B — our DecisionTree classifier (gini vs entropy)")
-    depths = [2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+    depths = [2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24]
     curves = {}
     for crit in ("gini", "entropy"):
         f1s = []
@@ -305,6 +315,58 @@ def task_b_svm(Xs_tr, tier_tr, Xs_val, tier_val, Xs_te, tier_te):
            "J(w, b) (log scale)")
     savefig(fig, "fig_svm_objective.png")
 
+    # --- P3b: the other two hyperparameters — epochs and the LR schedule ---
+    steps_per_epoch = int(np.ceil(len(tier_tr) / 64))
+    epochs = [1, 2, 5, 10, 20, 50]
+    ep_f1, ep_margin = [], []
+    for e in epochs:
+        svm = PegasosSVM(lambda_=best_lambda, n_epochs=e, batch_size=64,
+                         random_state=SEED, track_every=0).fit(Xs_tr, tier_tr)
+        ep_f1.append(ev.precision_recall_f1(tier_val, svm.predict(Xs_val))[2])
+        ep_margin.append(svm.margin_width_)
+        print(f"  epochs={e:>2} ({svm.n_iters_:>6} steps)  val F1={ep_f1[-1]:.4f}"
+              f"  margin={svm.margin_width_:.4f}")
+
+    schedules = [("pegasos", "1/(λt)"), ("inv_sqrt", "η0/√t"),
+                 ("constant", "η0")]
+    sched_hist, sched_f1, sched_margin = {}, {}, {}
+    for key, label in schedules:
+        svm = PegasosSVM(lambda_=best_lambda, n_iters=30_000, batch_size=64,
+                         random_state=SEED, lr_schedule=key, eta0=0.1
+                         ).fit(Xs_tr, tier_tr)
+        sched_hist[key] = svm.objective_history_
+        sched_f1[key] = ev.precision_recall_f1(tier_val,
+                                               svm.predict(Xs_val))[2]
+        sched_margin[key] = svm.margin_width_
+        print(f"  schedule={key:<9} ({label})  val F1={sched_f1[key]:.4f}"
+              f"  margin={svm.margin_width_:.4f}"
+              f"  final J={svm.objective_history_[-1][1]:.4f}")
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.6))
+    ax = axes[0]
+    ax.plot(epochs, ep_f1, "-o", ms=4, color=C_ORANGE)
+    ax.set_xscale("log")
+    _style(ax, f"(a) Validation F1 vs epochs (λ={best_lambda:.0e})",
+           f"epochs (1 epoch = {steps_per_epoch} mini-batch steps)",
+           "validation F1")
+    ax = axes[1]
+    for (key, label), col in zip(schedules, [C_PURPLE, C_GREEN, C_VERM]):
+        h = sched_hist[key]
+        ax.plot([t for t, _ in h], [v for _, v in h], color=col,
+                label=f"{label}: F1={sched_f1[key]:.3f}")
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax, "(b) Objective J(w,b) by learning-rate schedule",
+           "iteration t", "J(w, b) (log scale)")
+    savefig(fig, "fig_svm_schedule.png")
+    RESULTS["taskB_svm_epochs"] = {"epochs": epochs, "val_F1": ep_f1,
+                                   "margin": ep_margin,
+                                   "steps_per_epoch": steps_per_epoch}
+    RESULTS["taskB_svm_schedules"] = {k: {"val_F1": sched_f1[k],
+                                          "margin": sched_margin[k],
+                                          "final_J": sched_hist[k][-1][1]}
+                                      for k, _ in schedules}
+
     # final linear model
     lin = PegasosSVM(lambda_=best_lambda, n_iters=30_000, batch_size=64,
                      random_state=SEED)
@@ -350,7 +412,7 @@ def task_b_svm(Xs_tr, tier_tr, Xs_val, tier_val, Xs_te, tier_te):
 
     RESULTS["taskB_svm_config"] = {
         "lambda": best_lambda, "n_iters": 30_000, "batch_size": 64,
-        "norm_w": float(np.linalg.norm(lin.w)),
+        "lr_schedule": "pegasos", "norm_w": float(np.linalg.norm(lin.w)),
         "margin_width": lin.margin_width_,
         "n_support_vectors": int(len(lin.support_)),
         "rff_gamma": best_gamma, "rff_components": 300,
@@ -643,8 +705,8 @@ def analysis(df, names, tree_reg, tree_cls, svm_lin, Xs_te,
 
 # ---------------------------------------------------------------- step 9
 def bonuses(X_tr, ylog_tr, X_te, ylog_te, y_te, Xs_tr, Xs_te,
-            df, idx_te, pred_log_tree):
-    header("9. BONUSES — P8 Ridge (scratch), P9 RandomForest (scratch), "
+            df, idx_te, pred_log_tree, Xs_val, ylog_val):
+    header("9. BONUSES — P8 Ridge + SVR (scratch), P9 RandomForest (scratch), "
            "P10 k-means/PCA")
     from sklearn.cluster import KMeans
     from sklearn.decomposition import PCA
@@ -672,6 +734,40 @@ def bonuses(X_tr, ylog_tr, X_te, ylog_te, y_te, Xs_tr, Xs_te,
           round(out["ridge_sklearn"]["RMSE_log"], 6),
           "(diff vs ours:",
           f"{abs(out['ridge_ours']['RMSE_log']-out['ridge_sklearn']['RMSE_log']):.2e})")
+
+    # ---- P8b: SVR via sub-gradient descent on the epsilon-insensitive loss ----
+    from sklearn.svm import LinearSVR as SkLinearSVR
+    eps_grid = [0.02, 0.05, 0.1, 0.2]
+    eps_val = []
+    for eps in eps_grid:
+        m_ = LinearSVR(lambda_=1e-4, epsilon=eps, n_epochs=1_500,
+                       eta0=0.5).fit(Xs_tr, ylog_tr)
+        eps_val.append(ev.rmse(ylog_val, m_.predict(Xs_val)))
+        print(f"  SVR epsilon={eps}  val RMSE_log={eps_val[-1]:.4f}")
+    best_eps = eps_grid[int(np.argmin(eps_val))]
+    svr = LinearSVR(lambda_=1e-4, epsilon=best_eps, n_epochs=1_500, eta0=0.5)
+    _, fit_s = ev.timed(svr.fit, Xs_tr, ylog_tr)
+    pred, pred_s = ev.timed(svr.predict, Xs_te)
+    TIMINGS["Ours: LinearSVR (sub-grad)"] = {"fit_s": fit_s, "pred_s": pred_s}
+    out["svr_ours"] = {"RMSE_log": ev.rmse(ylog_te, pred),
+                       "MAE_log": ev.mae(ylog_te, pred),
+                       "R2_log": ev.r2(ylog_te, pred),
+                       "RMSE_AZN": ev.rmse(y_te, np.exp(pred)),
+                       "MAE_AZN": ev.mae(y_te, np.exp(pred)),
+                       "R2_AZN": ev.r2(y_te, np.exp(pred))}
+    sk_svr = SkLinearSVR(C=1.0 / (1e-4 * len(ylog_tr)), epsilon=best_eps,
+                         loss="epsilon_insensitive", max_iter=20_000,
+                         random_state=SEED).fit(Xs_tr, ylog_tr)
+    skp = sk_svr.predict(Xs_te)
+    out["svr_sklearn"] = {"RMSE_log": ev.rmse(ylog_te, skp),
+                          "R2_log": ev.r2(ylog_te, skp)}
+    out["svr_epsilon"] = best_eps
+    print(f"  SVR ours (eps={best_eps}):",
+          {k: round(v, 4) for k, v in out["svr_ours"].items()})
+    print("  SVR sklearn LinearSVR RMSE_log:",
+          round(out["svr_sklearn"]["RMSE_log"], 4),
+          f"| objective {svr.objective_history_[0][1]:.4f} -> "
+          f"{svr.objective_history_[-1][1]:.4f}")
 
     # ---- P9: random forest from OUR trees ----
     rf = RandomForest(n_estimators=30, task="regression", max_depth=None,
@@ -771,6 +867,7 @@ def final_tables(mA_tree, skA, mB_tree, m_svm_lin, m_svm_rff, skB, bon):
         "Ours: DecisionTree (mse)": mA_tree,
         "sklearn: DecisionTreeRegressor": skA["sk_tree_reg"],
         "Ours: Ridge (normal eq.) [B8]": bon["ridge_ours"],
+        "Ours: LinearSVR (sub-grad) [B8]": bon["svr_ours"],
         "Ours: RandomForest x30 [B9]": bon["rf_ours"],
     }, title="TASK A — price regression (test set, log target)")
     lines.append(tA)
@@ -844,7 +941,7 @@ def main() -> None:
              tree_proba, svm_pred, thr)
 
     bon = bonuses(X_tr, ylog_tr, X_te, ylog_te, y_te, Xs_tr, Xs_te,
-                  df, idx_te, pred_log_tree)
+                  df, idx_te, pred_log_tree, Xs_val, ylog_val)
 
     final_tables(mA_tree, skl, mB_tree, m_svm_lin, m_svm_rff, skl, bon)
 
