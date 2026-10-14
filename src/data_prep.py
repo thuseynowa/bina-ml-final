@@ -125,7 +125,13 @@ def clean(df: pd.DataFrame, log: CleaningLog | None = None) -> pd.DataFrame:
     df = df[df["Kateqoriya"].isin(RESIDENTIAL_CATEGORIES)].copy()
     log.note("after keeping residential categories", df)
 
-    # 3. parse numeric columns that arrive as Azerbaijani strings
+    # 3. parse numeric columns that arrive as Azerbaijani strings.
+    #    Currency check first: the statement says "watch the currency" —
+    #    every row of this dump is AZN, and we assert it rather than assume.
+    for col in ("currency_x", "currency_y"):
+        if col in df.columns:
+            bad = df[col].dropna().astype(str).str.upper().ne("AZN").sum()
+            assert bad == 0, f"{bad} rows in {col} are not AZN — add conversion"
     df["area_m2"] = _parse_area(df["Sahə"])
     floor, total_floors = _parse_floor(df["Mərtəbə"])
     df["floor"] = floor
@@ -179,7 +185,7 @@ def _haversine_km(lat1, lng1, lat2, lng2):
     return 2 * r * np.arcsin(np.sqrt(a))
 
 
-def make_features(df: pd.DataFrame):
+def make_features(df: pd.DataFrame, train_idx=None):
     """
     Cleaned frame → numeric design matrix.
 
@@ -187,6 +193,12 @@ def make_features(df: pd.DataFrame):
     indicator (no statistics involved → leakage-free by construction).
     Categoricals are one-hot encoded; `location` keeps the TOP_LOCATIONS
     most frequent districts and folds the rest into 'other'.
+
+    `train_idx`: positional indices of the TRAINING rows. The district
+    vocabulary (which 30 districts get their own column) is the only
+    data-dependent choice in feature construction, so it is fitted on
+    the training rows alone — val/test rows never influence it.
+    If None (toy usage), the whole frame is used.
 
     Returns (X, y, feature_names) with X float64, y = price in AZN.
     """
@@ -227,8 +239,9 @@ def make_features(df: pd.DataFrame):
                 .replace("ə", "e").replace("ö", "o").replace("ı", "i"))
         out[f"cat_{safe}"] = (df["Kateqoriya"] == cat).astype(float)
 
-    # district: top-K one-hot + 'other'
-    top = df["location"].value_counts().head(TOP_LOCATIONS).index.tolist()
+    # district: top-K one-hot + 'other' — vocabulary from TRAIN rows only
+    fit_rows = df if train_idx is None else df.iloc[np.asarray(train_idx)]
+    top = fit_rows["location"].value_counts().head(TOP_LOCATIONS).index.tolist()
     for loc in top:
         safe = (unicodedata.normalize("NFD", loc).encode("ascii", "ignore")
                 .decode().lower().replace(" ", "_").replace(".", ""))
@@ -253,23 +266,51 @@ def make_tier_label(y_price, threshold: float | None = None):
     return (y_price > threshold).astype(int), threshold
 
 
+def stratified_split_indices(y, val_size=0.15, test_size=0.15, seed=SEED,
+                             n_strata=10):
+    """
+    Deterministic STRATIFIED 70/15/15 split (indices only).
+
+    Strata = deciles of log(price). Each decile is shuffled with the seed
+    and cut 70/15/15, so every split carries the same price distribution.
+    This stratifies Task A directly and Task B by construction: the tier
+    label is "price above the train median", i.e. a cut inside the 5th
+    decile, so the premium share is matched across splits as well.
+    (We cannot stratify on the tier label itself — it only exists once
+    the training split and its median exist.)
+    """
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    edges = np.quantile(np.log(y), np.linspace(0, 1, n_strata + 1))
+    strata = np.clip(np.digitize(np.log(y), edges[1:-1]), 0, n_strata - 1)
+    rng = np.random.default_rng(seed)
+    idx_tr, idx_val, idx_te = [], [], []
+    for s in range(n_strata):
+        members = rng.permutation(np.nonzero(strata == s)[0])
+        m = len(members)
+        n_te = int(round(m * test_size))
+        n_va = int(round(m * val_size))
+        idx_te.append(members[:n_te])
+        idx_val.append(members[n_te:n_te + n_va])
+        idx_tr.append(members[n_te + n_va:])
+    idx_tr = np.sort(np.concatenate(idx_tr))
+    idx_val = np.sort(np.concatenate(idx_val))
+    idx_te = np.sort(np.concatenate(idx_te))
+    assert len(idx_tr) + len(idx_val) + len(idx_te) == n
+    return idx_tr, idx_val, idx_te
+
+
 def train_val_test_split(X, y, val_size=0.15, test_size=0.15, seed=SEED):
     """
-    Deterministic shuffled split into train / validation / test
-    (70/15/15 by default). Returns (X_tr, y_tr, X_val, y_val, X_te, y_te,
-    idx_tr, idx_val, idx_te) — the indices let callers map rows back to
-    the cleaned frame for error analysis.
+    Stratified train / validation / test split (see
+    stratified_split_indices). Returns (X_tr, y_tr, X_val, y_val, X_te,
+    y_te, idx_tr, idx_val, idx_te) — the indices let callers map rows
+    back to the cleaned frame for error analysis.
     """
     X = np.asarray(X)
     y = np.asarray(y)
-    n = len(X)
-    rng = np.random.default_rng(seed)
-    perm = rng.permutation(n)
-    n_test = int(round(n * test_size))
-    n_val = int(round(n * val_size))
-    idx_te = perm[:n_test]
-    idx_val = perm[n_test:n_test + n_val]
-    idx_tr = perm[n_test + n_val:]
+    idx_tr, idx_val, idx_te = stratified_split_indices(
+        y, val_size=val_size, test_size=test_size, seed=seed)
     return (X[idx_tr], y[idx_tr], X[idx_val], y[idx_val], X[idx_te], y[idx_te],
             idx_tr, idx_val, idx_te)
 
