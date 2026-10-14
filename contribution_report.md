@@ -54,7 +54,7 @@ Equal split: modules were sized to be comparable, every member worked
 through the full two weeks, and the report/slides were reviewed jointly.
 
 ## AI-assistance disclosure (course rule §8.5)
-An AI assistant (Anthropic Claude, via Claude Code) was used for code
+An AI coding assistant was used for code
 scaffolding, refactoring, drafting the report/slides text and reviewing
 the project against the statement. All numbers come from our own
 pipeline (`python -m src.run_all`); every line of the submitted
