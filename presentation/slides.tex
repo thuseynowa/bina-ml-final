@@ -183,7 +183,7 @@
     \item Pegasos $\approx$ SGDClassifier(hinge): same loss, same
           schedule family.
     \item \textbf{Linear beats RBF here} (both ours and sklearn's):
-          after one-hot encoding, 38/55 features are binary; the
+          after one-hot encoding, 46/55 features are binary; the
           premium boundary is near-linear in area + centrality.
     \item Speed: our tree $\sim$6 s vs.\ sklearn 0.5 s (Cython, same
           $O(FN\log N)$); Pegasos 2.2 s; SVC-RBF needed a 15k subsample

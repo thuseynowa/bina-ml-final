@@ -349,7 +349,7 @@ $\mathbf w$ too slowly, leaving a wider but worse-placed margin.
 
 \textbf{Linear beats RBF here.} Both non-linear SVMs --- our Pegasos+RFF
 and sklearn's SVC-RBF --- lose to the linear models by 4--6 F1 points.
-After one-hot encoding, 38 of 55 features are binary and the informative
+After one-hot encoding, 46 of 55 features are binary and the informative
 numeric directions (area, distance to centre) are already near-linearly
 related to the log-price tier, so the RBF geometry mostly adds variance.
 That the two independent RBF implementations agree (0.849 vs.\ 0.845)
