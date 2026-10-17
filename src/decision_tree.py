@@ -106,6 +106,16 @@ class DecisionTree:
         """
         Return (feature, threshold, decrease) of the split with the largest
         weighted impurity decrease, or None if no valid split exists.
+
+        Vectorised search, done per feature:
+        1. Sort the samples by the feature once. Every split is then a cut
+           position in the sorted list, valid only where the value changes.
+        2. Use cumulative sums (class counts, or y and y^2 for regression)
+           to get the left-side statistics of all cuts at once. The right
+           side is the total minus the left side.
+        3. Score all cuts in one NumPy operation and take the best one.
+           The threshold is the midpoint between the two neighbouring
+           different values at that cut.
         """
         n, n_feat = X.shape
         msl = self.min_samples_leaf
@@ -124,7 +134,6 @@ class DecisionTree:
         for f in features:
             order = np.argsort(X[:, f], kind="stable")
             xs = X[order, f]
-            # candidate split after position i (0-based): left = [0..i]
             diff = xs[1:] != xs[:-1]
             pos = np.nonzero(diff)[0]
             pos = pos[(pos + 1 >= msl) & (n - pos - 1 >= msl)]
