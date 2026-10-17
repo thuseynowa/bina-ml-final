@@ -94,6 +94,17 @@ def test_tree_hyperparameters_change_the_tree():
     print("PASS every tree hyperparameter actually changes the tree")
 
 
+def test_tree_proba_and_importances_sum_to_one():
+    X, y = make_classification(n_samples=400, n_features=6, n_informative=4,
+                               n_classes=3, random_state=8)
+    tree = DecisionTree(task="classification", max_depth=5).fit(X, y)
+    proba = tree.predict_proba(X)
+    assert proba.shape == (len(y), 3)
+    assert np.allclose(proba.sum(axis=1), 1.0)
+    assert abs(tree.feature_importances_.sum() - 1.0) < 1e-9
+    print("PASS predict_proba rows and feature importances sum to one")
+
+
 def test_pegasos_objective_decreases_and_matches_linear_svm():
     X, y = make_classification(n_samples=800, n_features=12, n_informative=8,
                                class_sep=1.5, random_state=4)
@@ -199,6 +210,7 @@ def run_all_tests():
     test_tree_classification_accuracy_close_to_sklearn()
     test_tree_regression_close_to_sklearn()
     test_tree_hyperparameters_change_the_tree()
+    test_tree_proba_and_importances_sum_to_one()
     test_pegasos_objective_decreases_and_matches_linear_svm()
     test_pegasos_schedules_and_epochs()
     test_stratified_split_balances_price_and_tier()
